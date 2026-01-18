@@ -28,6 +28,8 @@ qrc_*.cpp
 
 # Qt Creator
 *.pro.user*
+*.user
+CMakeLists.txt.user
 .qtc_clangd/
 
 # OS

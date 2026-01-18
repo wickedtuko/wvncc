@@ -3,6 +3,8 @@
 
 #include <QMainWindow>
 #include <QImage>
+#include <QRect>
+#include <QPixmap>
 #include <thread>
 #include <string>
 
@@ -31,7 +33,9 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
+    bool event(QEvent *event) override;
 
 private:
     Ui::MainWindow *ui;
@@ -49,5 +53,18 @@ private:
     
     // Instance method for framebuffer updates
     void handleFramebufferUpdate(rfbClient *client);
+    
+    // Custom title bar elements
+    QRect titleBarRect;
+    QRect buttonRect;
+    QRect closeButtonRect;
+    QRect maxButtonRect;
+    QRect minButtonRect;
+    bool buttonHovered;
+    QPoint dragPosition;
+    bool isDragging;
+    QPixmap hideIcon;
+    QPixmap eyeIcon;
+    bool isToggled;
 };
 #endif // MAINWINDOW_H

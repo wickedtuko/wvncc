@@ -3,19 +3,35 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QCloseEvent>
+#include <QMessageBox>
+#include <QToolTip>
+#include <QHelpEvent>
 #include <iostream>
 
 extern "C" {
 #include "rfb/rfbclient.h"
 }
 
+const int TITLE_BAR_HEIGHT = 32;
+const int BUTTON_SIZE = 24;
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
+    , buttonHovered(false)
+    , isDragging(false)
+    , isToggled(false)
 {
     ui->setupUi(this);
+    
+    // Make window frameless
+    setWindowFlags(Qt::FramelessWindowHint | Qt::WindowSystemMenuHint);
     setWindowTitle("wvncc - VNC Client");
     setMouseTracking(true);
+    
+    // Load button icons from Qt resources
+    hideIcon.load(":/icons/resources/icons8-hide-24.png");
+    eyeIcon.load(":/icons/resources/icons8-eye-24.png");
 }
 
 MainWindow::~MainWindow()
@@ -132,20 +148,90 @@ void MainWindow::paintEvent(QPaintEvent *event)
 {
     event->accept();
     
+    QPainter painter(this);
+    
+    // Draw title bar
+    titleBarRect = QRect(0, 0, width(), TITLE_BAR_HEIGHT);
+    painter.fillRect(titleBarRect, QColor(31, 78, 121));
+    
+    // Draw window title
+    painter.setPen(Qt::white);
+    painter.setFont(QFont("Segoe UI", 10));
+    painter.drawText(10, 0, 200, TITLE_BAR_HEIGHT, Qt::AlignVCenter, windowTitle());
+    
+    // Draw window control buttons (minimize, maximize, close)
+    int buttonSize = TITLE_BAR_HEIGHT - 8;
+    int rightOffset = width() - buttonSize - 4;
+    
+    // Close button
+    closeButtonRect = QRect(rightOffset, 4, buttonSize, buttonSize);
+    painter.fillRect(closeButtonRect, QColor(232, 17, 35));
+    painter.setPen(Qt::white);
+    painter.drawLine(closeButtonRect.x() + 8, closeButtonRect.y() + 8, closeButtonRect.x() + closeButtonRect.width() - 8, closeButtonRect.y() + closeButtonRect.height() - 8);
+    painter.drawLine(closeButtonRect.x() + closeButtonRect.width() - 8, closeButtonRect.y() + 8, closeButtonRect.x() + 8, closeButtonRect.y() + closeButtonRect.height() - 8);
+    
+    // Maximize button
+    maxButtonRect = QRect(rightOffset - buttonSize - 4, 4, buttonSize, buttonSize);
+    painter.fillRect(maxButtonRect, QColor(200, 200, 200));
+    painter.setPen(Qt::black);
+    painter.drawRect(maxButtonRect.x() + 6, maxButtonRect.y() + 6, buttonSize - 10, buttonSize - 10);
+    
+    // Minimize button
+    minButtonRect = QRect(rightOffset - (buttonSize + 4) * 2, 4, buttonSize, buttonSize);
+    painter.fillRect(minButtonRect, QColor(200, 200, 200));
+    painter.setPen(Qt::black);
+    painter.drawLine(minButtonRect.x() + 6, minButtonRect.y() + minButtonRect.height() - 8, minButtonRect.x() + minButtonRect.width() - 6, minButtonRect.y() + minButtonRect.height() - 8);
+    
+    // Draw custom button to the left of minimize button
+    buttonRect = QRect(minButtonRect.x() - buttonSize - 4, 4, buttonSize, buttonSize);
+    
+    QColor buttonColor = buttonHovered ? QColor(180, 180, 180) : QColor(200, 200, 200);
+    painter.fillRect(buttonRect, buttonColor);
+    painter.drawRect(buttonRect);
+    
+    // Draw icon centered in button
+    QPixmap& currentIcon = isToggled ? eyeIcon : hideIcon;
+    if (!currentIcon.isNull()) {
+        int iconX = buttonRect.center().x() - currentIcon.width() / 2;
+        int iconY = buttonRect.center().y() - currentIcon.height() / 2;
+        painter.drawPixmap(iconX, iconY, currentIcon);
+    }
+    
+    // Draw separator line
+    painter.setPen(QColor(150, 150, 150));
+    painter.drawLine(0, TITLE_BAR_HEIGHT, width(), TITLE_BAR_HEIGHT);
+    
+    // Draw VNC framebuffer content
     if (!m_framebuffer.isNull()) {
-        QPainter painter(this);
-        painter.drawImage(rect(), m_framebuffer);
+        painter.drawImage(0, TITLE_BAR_HEIGHT, m_framebuffer.scaled(width(), height() - TITLE_BAR_HEIGHT, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
     } else {
-        // Draw placeholder when not connected
-        QMainWindow::paintEvent(event);
+        painter.fillRect(0, TITLE_BAR_HEIGHT, width(), height() - TITLE_BAR_HEIGHT, Qt::white);
     }
 }
 
 void MainWindow::mouseMoveEvent(QMouseEvent *event)
 {
-    if (m_connected && m_client) {
+    // Handle window dragging
+    if (isDragging && event->pos().y() < TITLE_BAR_HEIGHT) {
+        move(event->globalPos() - dragPosition);
+        return;
+    }
+    
+    bool wasHovered = buttonHovered;
+    buttonHovered = buttonRect.contains(event->pos());
+    
+    if (wasHovered != buttonHovered) {
+        update();
+    }
+    
+    if (buttonHovered) {
+        setCursor(Qt::PointingHandCursor);
+    } else if (event->pos().y() < TITLE_BAR_HEIGHT) {
+        setCursor(Qt::SizeAllCursor);
+    } else if (m_connected && m_client) {
+        setCursor(Qt::ArrowCursor);
         int x = event->position().x() / width() * m_client->width;
-        int y = event->position().y() / height() * m_client->height;
+        int y = (event->position().y() - TITLE_BAR_HEIGHT) / (height() - TITLE_BAR_HEIGHT) * m_client->height;
         int buttonMask = (event->buttons() & Qt::LeftButton) ? 1 : 0;
         SendPointerEvent(m_client, x, y, buttonMask);
     }
@@ -153,20 +239,83 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event)
 
 void MainWindow::mousePressEvent(QMouseEvent *event)
 {
+    if (buttonRect.contains(event->pos())) {
+        isToggled = !isToggled;
+        update();
+        QString message = isToggled ? "Read-Only" : "Active";
+        QMessageBox::information(this, "Status", message);
+        return;
+    }
+    
+    if (closeButtonRect.contains(event->pos())) {
+        close();
+        return;
+    }
+    
+    if (maxButtonRect.contains(event->pos())) {
+        if (isMaximized()) {
+            showNormal();
+        } else {
+            showMaximized();
+        }
+        return;
+    }
+    
+    if (minButtonRect.contains(event->pos())) {
+        showMinimized();
+        return;
+    }
+    
+    // Enable dragging from title bar
+    if (event->pos().y() < TITLE_BAR_HEIGHT) {
+        isDragging = true;
+        dragPosition = event->globalPos() - frameGeometry().topLeft();
+    }
+    
     if (m_connected && m_client) {
         int x = event->position().x() / width() * m_client->width;
-        int y = event->position().y() / height() * m_client->height;
+        int y = (event->position().y() - TITLE_BAR_HEIGHT) / (height() - TITLE_BAR_HEIGHT) * m_client->height;
         SendPointerEvent(m_client, x, y, 1);
     }
 }
 
 void MainWindow::mouseReleaseEvent(QMouseEvent *event)
 {
+    isDragging = false;
     if (m_connected && m_client) {
         int x = event->position().x() / width() * m_client->width;
-        int y = event->position().y() / height() * m_client->height;
+        int y = (event->position().y() - TITLE_BAR_HEIGHT) / (height() - TITLE_BAR_HEIGHT) * m_client->height;
         SendPointerEvent(m_client, x, y, 0);
     }
+}
+
+void MainWindow::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    // Double-click on title bar to maximize/restore
+    if (event->pos().y() < TITLE_BAR_HEIGHT && !buttonRect.contains(event->pos())) {
+        if (isMaximized()) {
+            showNormal();
+        } else {
+            showMaximized();
+        }
+    }
+    QMainWindow::mouseDoubleClickEvent(event);
+}
+
+bool MainWindow::event(QEvent *event)
+{
+    if (event->type() == QEvent::ToolTip) {
+        QHelpEvent *helpEvent = static_cast<QHelpEvent *>(event);
+        if (buttonRect.contains(helpEvent->pos())) {
+            QString tooltipText = isToggled ? "Read-Only" : "Active";
+            QToolTip::showText(helpEvent->globalPos(), tooltipText, this);
+        } else {
+            QToolTip::hideText();
+            event->ignore();
+        }
+        return true;
+    }
+    return QMainWindow::event(event);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
