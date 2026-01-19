@@ -11,6 +11,8 @@
 #include <QDebug>
 #include <QSettings>
 #include <QFocusEvent>
+#include <QScreen>
+#include <QApplication>
 #include <algorithm>
 #include <iostream>
 
@@ -53,8 +55,13 @@ MainWindow::MainWindow(QWidget *parent)
     
     // Restore window position and read-only state from settings
     QSettings settings("wvncc", "wvncc");
-    if (settings.contains("windowGeometry")) {
-        restoreGeometry(settings.value("windowGeometry").toByteArray());
+    if (settings.contains("windowPosition")) {
+        QPoint pos = settings.value("windowPosition").toPoint();
+        move(pos);
+    }
+    if (settings.contains("windowSize")) {
+        QSize size = settings.value("windowSize").toSize();
+        resize(size);
     }
     if (settings.contains("readOnlyMode")) {
         m_readOnly = settings.value("readOnlyMode").toBool();
@@ -152,8 +159,46 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
     std::cout << "[INFO] Connected to " << serverIp << ":" << serverPort << std::endl;
     std::cout << "[INFO] Screen size: " << m_client->width << "x" << m_client->height << std::endl;
     
-    // Resize window to match remote framebuffer plus title bar
-    resize(m_client->width, m_client->height + TITLE_BAR_HEIGHT);
+    // Calculate window size to fit available display while respecting VNC aspect ratio
+    QScreen* screen = QApplication::primaryScreen();
+    QRect availableGeometry = screen->availableGeometry();
+    
+    int vncWidth = m_client->width;
+    int vncHeight = m_client->height;
+    int targetWidth = vncWidth;
+    int targetHeight = vncHeight + TITLE_BAR_HEIGHT;
+    
+    QSettings settings("wvncc", "wvncc");
+    
+    // If VNC fits at 1:1, use 1:1 scale (don't resize if saved geometry exists to preserve position)
+    if (targetWidth <= availableGeometry.width() && targetHeight <= availableGeometry.height()) {
+        if (!settings.contains("windowSize")) {
+            // First run: set 1:1 size
+            resize(targetWidth, targetHeight);
+            std::cout << "[INFO] Window sized 1:1 to " << targetWidth << "x" << targetHeight << std::endl;
+        } else {
+            // Re-open: keep saved position and size
+            std::cout << "[INFO] Using saved window geometry at 1:1 scale" << std::endl;
+        }
+    } else {
+        // VNC too large for 1:1
+        if (settings.contains("windowSize")) {
+            // Use saved geometry (user's preferred scaled size)
+            std::cout << "[INFO] Using saved window geometry" << std::endl;
+        } else {
+            // First run - scale down to fit
+            double scaleWidth = static_cast<double>(availableGeometry.width()) / targetWidth;
+            double scaleHeight = static_cast<double>(availableGeometry.height()) / targetHeight;
+            double scale = std::min(scaleWidth, scaleHeight);
+            
+            targetWidth = static_cast<int>(targetWidth * scale);
+            targetHeight = static_cast<int>(targetHeight * scale);
+            
+            resize(targetWidth, targetHeight);
+            std::cout << "[INFO] Scaled window to " << targetWidth << "x" << targetHeight 
+                      << " (scale factor: " << scale << ")" << std::endl;
+        }
+    }
 
     // Send multiple button release events to ensure server clears any stale button state
     for (int i = 0; i < 3; i++) {
@@ -575,9 +620,10 @@ bool MainWindow::event(QEvent *event)
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    // Save window position and read-only state to settings
+    // Save window position, size, and read-only state to settings
     QSettings settings("wvncc", "wvncc");
-    settings.setValue("windowGeometry", saveGeometry());
+    settings.setValue("windowPosition", pos());
+    settings.setValue("windowSize", size());
     settings.setValue("readOnlyMode", m_readOnly);
     
     m_connected = false;
