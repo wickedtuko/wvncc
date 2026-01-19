@@ -65,6 +65,7 @@ private:
     void handleFramebufferUpdate(rfbClient *client);
     void syncPointerToCurrentCursor();
     uint32_t qtKeyToX11Keysym(int qtKey, Qt::KeyboardModifiers modifiers, const QString& text);
+    QRect getScaledFramebufferRect() const;
     
 #ifdef _WIN32
     static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
