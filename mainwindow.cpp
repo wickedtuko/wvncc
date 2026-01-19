@@ -241,9 +241,27 @@ void MainWindow::paintEvent(QPaintEvent *event)
     painter.setPen(QColor(150, 150, 150));
     painter.drawLine(0, TITLE_BAR_HEIGHT, width(), TITLE_BAR_HEIGHT);
     
-    // Draw VNC framebuffer content at 100% (no scaling)
+    // Draw VNC framebuffer content scaled to fit window while maintaining aspect ratio
     if (!m_framebuffer.isNull()) {
-        painter.drawImage(0, TITLE_BAR_HEIGHT, m_framebuffer);
+        QRect targetRect(0, TITLE_BAR_HEIGHT, width(), height() - TITLE_BAR_HEIGHT);
+        QSize scaledSize = m_framebuffer.size().scaled(targetRect.size(), Qt::KeepAspectRatio);
+        
+        // Center the scaled image
+        int x = (targetRect.width() - scaledSize.width()) / 2;
+        int y = targetRect.y() + (targetRect.height() - scaledSize.height()) / 2;
+        
+        QRect destRect(x, y, scaledSize.width(), scaledSize.height());
+        painter.drawImage(destRect, m_framebuffer);
+        
+        // Fill letterbox/pillarbox areas
+        if (x > 0) {
+            painter.fillRect(0, TITLE_BAR_HEIGHT, x, height() - TITLE_BAR_HEIGHT, Qt::black);
+            painter.fillRect(x + scaledSize.width(), TITLE_BAR_HEIGHT, width() - (x + scaledSize.width()), height() - TITLE_BAR_HEIGHT, Qt::black);
+        }
+        if (y > TITLE_BAR_HEIGHT) {
+            painter.fillRect(0, TITLE_BAR_HEIGHT, width(), y - TITLE_BAR_HEIGHT, Qt::black);
+            painter.fillRect(0, y + scaledSize.height(), width(), height() - (y + scaledSize.height()), Qt::black);
+        }
     } else {
         painter.fillRect(0, TITLE_BAR_HEIGHT, width(), height() - TITLE_BAR_HEIGHT, Qt::white);
     }
@@ -357,14 +375,18 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event)
         setCursor(Qt::ArrowCursor);
     } else if (m_connected && m_client && !m_readOnly && event->pos().y() >= TITLE_BAR_HEIGHT) {
         setCursor(Qt::ArrowCursor);
-        int x = std::round(event->position().x() / static_cast<double>(width()) * m_client->width);
-        int y = std::round((event->position().y() - TITLE_BAR_HEIGHT) / static_cast<double>(height() - TITLE_BAR_HEIGHT) * m_client->height);
         
-        x = std::clamp(x, 0, m_client->width - 1);
-        y = std::clamp(y, 0, m_client->height - 1);
-        
-        SendPointerEvent(m_client, x, y, m_buttonMask);
-        m_pointerSyncedSinceToggle = true;
+        QRect scaledRect = getScaledFramebufferRect();
+        if (scaledRect.contains(event->pos())) {
+            int x = std::round((event->position().x() - scaledRect.x()) / static_cast<double>(scaledRect.width()) * m_client->width);
+            int y = std::round((event->position().y() - scaledRect.y()) / static_cast<double>(scaledRect.height()) * m_client->height);
+            
+            x = std::clamp(x, 0, m_client->width - 1);
+            y = std::clamp(y, 0, m_client->height - 1);
+            
+            SendPointerEvent(m_client, x, y, m_buttonMask);
+            m_pointerSyncedSinceToggle = true;
+        }
     }
 }
 
@@ -421,8 +443,13 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
     }
     
     if (m_connected && m_client && !m_readOnly && event->pos().y() >= TITLE_BAR_HEIGHT) {
-        int x = std::round(event->position().x() / static_cast<double>(width()) * m_client->width);
-        int y = std::round((event->position().y() - TITLE_BAR_HEIGHT) / static_cast<double>(height() - TITLE_BAR_HEIGHT) * m_client->height);
+        QRect scaledRect = getScaledFramebufferRect();
+        if (!scaledRect.contains(event->pos())) {
+            return;
+        }
+        
+        int x = std::round((event->position().x() - scaledRect.x()) / static_cast<double>(scaledRect.width()) * m_client->width);
+        int y = std::round((event->position().y() - scaledRect.y()) / static_cast<double>(scaledRect.height()) * m_client->height);
 
         x = std::clamp(x, 0, m_client->width - 1);
         y = std::clamp(y, 0, m_client->height - 1);
@@ -464,8 +491,9 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *event)
         
         m_buttonMask &= ~buttonMask;
         
-        int x = std::round(event->position().x() / static_cast<double>(width()) * m_client->width);
-        int y = std::round((event->position().y() - TITLE_BAR_HEIGHT) / static_cast<double>(height() - TITLE_BAR_HEIGHT) * m_client->height);
+        QRect scaledRect = getScaledFramebufferRect();
+        int x = std::round((event->position().x() - scaledRect.x()) / static_cast<double>(scaledRect.width()) * m_client->width);
+        int y = std::round((event->position().y() - scaledRect.y()) / static_cast<double>(scaledRect.height()) * m_client->height);
         
         x = std::clamp(x, 0, m_client->width - 1);
         y = std::clamp(y, 0, m_client->height - 1);
@@ -483,18 +511,32 @@ void MainWindow::syncPointerToCurrentCursor()
     QPoint globalPos = QCursor::pos();
     QPoint localPos = mapFromGlobal(globalPos);
 
-    // Only sync when inside the framebuffer area
-    if (localPos.y() < TITLE_BAR_HEIGHT || localPos.x() < 0 || localPos.y() < 0 || localPos.x() >= width() || localPos.y() >= height()) {
+    QRect scaledRect = getScaledFramebufferRect();
+    if (!scaledRect.contains(localPos)) {
         return;
     }
 
-    int x = std::round(localPos.x() / static_cast<double>(width()) * m_client->width);
-    int y = std::round((localPos.y() - TITLE_BAR_HEIGHT) / static_cast<double>(height() - TITLE_BAR_HEIGHT) * m_client->height);
+    int x = std::round((localPos.x() - scaledRect.x()) / static_cast<double>(scaledRect.width()) * m_client->width);
+    int y = std::round((localPos.y() - scaledRect.y()) / static_cast<double>(scaledRect.height()) * m_client->height);
 
     x = std::clamp(x, 0, m_client->width - 1);
     y = std::clamp(y, 0, m_client->height - 1);
 
     SendPointerEvent(m_client, x, y, m_buttonMask);
+}
+
+QRect MainWindow::getScaledFramebufferRect() const
+{
+    if (!m_framebuffer.isNull()) {
+        QRect targetRect(0, TITLE_BAR_HEIGHT, width(), height() - TITLE_BAR_HEIGHT);
+        QSize scaledSize = m_framebuffer.size().scaled(targetRect.size(), Qt::KeepAspectRatio);
+        
+        int x = (targetRect.width() - scaledSize.width()) / 2;
+        int y = targetRect.y() + (targetRect.height() - scaledSize.height()) / 2;
+        
+        return QRect(x, y, scaledSize.width(), scaledSize.height());
+    }
+    return QRect();
 }
 
 void MainWindow::mouseDoubleClickEvent(QMouseEvent *event)
