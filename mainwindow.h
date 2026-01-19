@@ -77,6 +77,7 @@ private:
     HHOOK m_keyboardHook = nullptr;
     bool m_winKeyPressed = false;
     bool m_winKeySentToVNC = false;
+    bool m_altKeyPressed = false;
     bool m_popupMenuOpen = false;
     void installKeyboardHook();
     void uninstallKeyboardHook();

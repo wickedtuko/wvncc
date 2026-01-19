@@ -899,10 +899,10 @@ LRESULT CALLBACK MainWindow::LowLevelKeyboardProc(int nCode, WPARAM wParam, LPAR
 {
     if (nCode == HC_ACTION && s_instance && s_instance->m_connected) {
         KBDLLHOOKSTRUCT* pKeyboard = (KBDLLHOOKSTRUCT*)lParam;
+        bool isKeyDown = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
         
         // Intercept Windows keys (VK_LWIN and VK_RWIN)
         if (pKeyboard->vkCode == VK_LWIN || pKeyboard->vkCode == VK_RWIN) {
-            bool isKeyDown = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
             s_instance->m_winKeyPressed = isKeyDown;
             
             // Only send to VNC server if in active mode
@@ -917,6 +917,31 @@ LRESULT CALLBACK MainWindow::LowLevelKeyboardProc(int nCode, WPARAM wParam, LPAR
             }
             // In read-only mode, let the Windows key through so OS sees press/release correctly
             return 0;
+        }
+        
+        // Intercept Alt key (VK_LMENU and VK_RMENU)
+        if (pKeyboard->vkCode == VK_LMENU || pKeyboard->vkCode == VK_RMENU) {
+            s_instance->m_altKeyPressed = isKeyDown;
+            
+            // Only block and send Alt if in active mode, but allow it to reach Qt for Alt+F8
+            if (!s_instance->m_readOnly && s_instance->m_client) {
+                uint32_t keysym = (pKeyboard->vkCode == VK_LMENU) ? XK_Alt_L : XK_Alt_R;
+                SendKeyEvent(s_instance->m_client, keysym, isKeyDown ? TRUE : FALSE);
+                // Block Alt from reaching the OS in active mode (but let Qt see it for Alt+F8)
+                // We return 0 here to let it reach Qt, then Qt will handle it
+                return 0;
+            }
+        }
+        
+        // Intercept Tab when Alt is pressed to handle Alt+Tab
+        if (pKeyboard->vkCode == VK_TAB && s_instance->m_altKeyPressed) {
+            // Only block Alt+Tab if in active mode
+            if (!s_instance->m_readOnly && s_instance->m_client) {
+                // Send Tab to VNC server
+                SendKeyEvent(s_instance->m_client, XK_Tab, isKeyDown ? TRUE : FALSE);
+                // Block Tab from reaching the OS
+                return 1;
+            }
         }
     }
     
