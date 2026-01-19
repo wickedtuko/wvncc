@@ -420,10 +420,63 @@ void MainWindow::focusOutEvent(QFocusEvent *event)
 
 void MainWindow::mouseMoveEvent(QMouseEvent *event)
 {
+    // Handle window resizing
+    if (isResizing && event->buttons() & Qt::LeftButton) {
+        QPoint delta = event->globalPosition().toPoint() - resizeStartPos;
+        QRect newGeometry = resizeStartGeometry;
+        
+        if (resizeEdge & 1) {  // Left edge
+            newGeometry.setLeft(resizeStartGeometry.left() + delta.x());
+        }
+        if (resizeEdge & 2) {  // Right edge
+            newGeometry.setRight(resizeStartGeometry.right() + delta.x());
+        }
+        if (resizeEdge & 4) {  // Top edge
+            newGeometry.setTop(resizeStartGeometry.top() + delta.y());
+        }
+        if (resizeEdge & 8) {  // Bottom edge
+            newGeometry.setBottom(resizeStartGeometry.bottom() + delta.y());
+        }
+        
+        // Enforce minimum size
+        if (newGeometry.width() >= 200 && newGeometry.height() >= 200) {
+            setGeometry(newGeometry);
+        }
+        return;
+    }
+    
     // Handle window dragging
     if (isDragging && event->pos().y() < TITLE_BAR_HEIGHT) {
-        move(event->globalPos() - dragPosition);
+        move(event->globalPosition().toPoint() - dragPosition);
         return;
+    }
+    
+    // Check for resize edge detection and set cursor
+    int posX = event->pos().x();
+    int posY = event->pos().y();
+    int winWidth = width();
+    int winHeight = height();
+    
+    bool onLeft = posX < RESIZE_BORDER;
+    bool onRight = posX > winWidth - RESIZE_BORDER;
+    bool onTop = posY < RESIZE_BORDER;
+    bool onBottom = posY > winHeight - RESIZE_BORDER;
+    
+    if ((onLeft || onRight) && (onTop || onBottom)) {
+        // Corner resize
+        if ((onLeft && onTop) || (onRight && onBottom)) {
+            setCursor(Qt::SizeFDiagCursor);
+        } else {
+            setCursor(Qt::SizeBDiagCursor);
+        }
+    } else if (onLeft || onRight) {
+        setCursor(Qt::SizeHorCursor);
+    } else if (onTop || onBottom) {
+        setCursor(Qt::SizeVerCursor);
+    } else if (buttonHovered) {
+        setCursor(Qt::PointingHandCursor);
+    } else if (event->pos().y() < TITLE_BAR_HEIGHT) {
+        setCursor(Qt::ArrowCursor);
     }
     
     bool wasHovered = buttonHovered;
@@ -435,9 +488,9 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event)
     
     if (buttonHovered) {
         setCursor(Qt::PointingHandCursor);
-    } else if (event->pos().y() < TITLE_BAR_HEIGHT) {
+    } else if (event->pos().y() < TITLE_BAR_HEIGHT && !onLeft && !onRight && !onTop && !onBottom) {
         setCursor(Qt::ArrowCursor);
-    } else if (m_connected && m_client && !m_readOnly && event->pos().y() >= TITLE_BAR_HEIGHT) {
+    } else if (m_connected && m_client && !m_readOnly && event->pos().y() >= TITLE_BAR_HEIGHT && !onLeft && !onRight && !onTop && !onBottom) {
         setCursor(Qt::ArrowCursor);
         
         QRect scaledRect = getScaledFramebufferRect();
@@ -491,10 +544,34 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
         return;
     }
     
+    // Check for resize edge and start resize operation
+    int posX = event->pos().x();
+    int posY = event->pos().y();
+    int winWidth = width();
+    int winHeight = height();
+    
+    bool onLeft = posX < RESIZE_BORDER;
+    bool onRight = posX > winWidth - RESIZE_BORDER;
+    bool onTop = posY < RESIZE_BORDER;
+    bool onBottom = posY > winHeight - RESIZE_BORDER;
+    
+    if ((onLeft || onRight || onTop || onBottom) && event->button() == Qt::LeftButton) {
+        isResizing = true;
+        resizeStartPos = event->globalPosition().toPoint();
+        resizeStartGeometry = frameGeometry();
+        resizeEdge = 0;
+        
+        if (onLeft) resizeEdge |= 1;       // Left
+        if (onRight) resizeEdge |= 2;      // Right
+        if (onTop) resizeEdge |= 4;        // Top
+        if (onBottom) resizeEdge |= 8;     // Bottom
+        return;
+    }
+    
     // Enable dragging from title bar
     if (event->pos().y() < TITLE_BAR_HEIGHT) {
         isDragging = true;
-        dragPosition = event->globalPos() - frameGeometry().topLeft();
+        dragPosition = event->globalPosition().toPoint() - frameGeometry().topLeft();
         return;
     }
     
@@ -534,6 +611,8 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
 void MainWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     isDragging = false;
+    isResizing = false;
+    
     if (m_connected && m_client && !m_readOnly && event->pos().y() >= TITLE_BAR_HEIGHT) {
         // Map Qt mouse buttons to VNC button mask
         int buttonMask = 0;
@@ -711,6 +790,72 @@ void MainWindow::closeEvent(QCloseEvent *event)
     }
     QMainWindow::closeEvent(event);
 }
+
+#ifdef _WIN32
+bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
+{
+    if (eventType == "windows.nativeEvent") {
+        MSG* msg = static_cast<MSG*>(message);
+        
+        if (msg->message == WM_NCHITTEST) {
+            QPoint globalPos = QCursor::pos();
+            QPoint localPos = mapFromGlobal(globalPos);
+            
+            int posX = localPos.x();
+            int posY = localPos.y();
+            int winWidth = width();
+            int winHeight = height();
+            
+            bool onLeft = posX < RESIZE_BORDER;
+            bool onRight = posX > winWidth - RESIZE_BORDER;
+            bool onTop = posY < RESIZE_BORDER;
+            bool onBottom = posY > winHeight - RESIZE_BORDER;
+            
+            // Return appropriate NCHITTEST value for resize areas
+            if (onLeft && onTop) {
+                *result = HTTOPLEFT;
+                return true;
+            }
+            if (onRight && onTop) {
+                *result = HTTOPRIGHT;
+                return true;
+            }
+            if (onLeft && onBottom) {
+                *result = HTBOTTOMLEFT;
+                return true;
+            }
+            if (onRight && onBottom) {
+                *result = HTBOTTOMRIGHT;
+                return true;
+            }
+            if (onLeft) {
+                *result = HTLEFT;
+                return true;
+            }
+            if (onRight) {
+                *result = HTRIGHT;
+                return true;
+            }
+            if (onTop) {
+                *result = HTTOP;
+                return true;
+            }
+            if (onBottom) {
+                *result = HTBOTTOM;
+                return true;
+            }
+            
+            // Check if in title bar for dragging
+            if (posY < TITLE_BAR_HEIGHT) {
+                *result = HTCAPTION;
+                return true;
+            }
+        }
+    }
+    
+    return QMainWindow::nativeEvent(eventType, message, result);
+}
+#endif
 
 #ifdef _WIN32
 LRESULT CALLBACK MainWindow::LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
