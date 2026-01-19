@@ -117,6 +117,8 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
     }
     
     m_connected = true;
+    m_readOnly = true;
+    isToggled = true;  // Sync button state with read-only mode
     std::cout << "[INFO] Connected to " << serverIp << ":" << serverPort << std::endl;
     std::cout << "[INFO] Screen size: " << m_client->width << "x" << m_client->height << std::endl;
     
@@ -228,7 +230,7 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event)
         setCursor(Qt::PointingHandCursor);
     } else if (event->pos().y() < TITLE_BAR_HEIGHT) {
         setCursor(Qt::SizeAllCursor);
-    } else if (m_connected && m_client) {
+    } else if (m_connected && m_client && !m_readOnly) {
         setCursor(Qt::ArrowCursor);
         int x = event->position().x() / width() * m_client->width;
         int y = (event->position().y() - TITLE_BAR_HEIGHT) / (height() - TITLE_BAR_HEIGHT) * m_client->height;
@@ -240,10 +242,9 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event)
 void MainWindow::mousePressEvent(QMouseEvent *event)
 {
     if (buttonRect.contains(event->pos())) {
-        isToggled = !isToggled;
+        m_readOnly = !m_readOnly;
+        isToggled = m_readOnly;
         update();
-        QString message = isToggled ? "Read-Only" : "Active";
-        QMessageBox::information(this, "Status", message);
         return;
     }
     
@@ -272,7 +273,7 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
         dragPosition = event->globalPos() - frameGeometry().topLeft();
     }
     
-    if (m_connected && m_client) {
+    if (m_connected && m_client && !m_readOnly) {
         int x = event->position().x() / width() * m_client->width;
         int y = (event->position().y() - TITLE_BAR_HEIGHT) / (height() - TITLE_BAR_HEIGHT) * m_client->height;
         SendPointerEvent(m_client, x, y, 1);
@@ -282,7 +283,7 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
 void MainWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     isDragging = false;
-    if (m_connected && m_client) {
+    if (m_connected && m_client && !m_readOnly) {
         int x = event->position().x() / width() * m_client->width;
         int y = (event->position().y() - TITLE_BAR_HEIGHT) / (height() - TITLE_BAR_HEIGHT) * m_client->height;
         SendPointerEvent(m_client, x, y, 0);
