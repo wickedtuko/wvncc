@@ -10,6 +10,7 @@
 #include <QCursor>
 #include <QDebug>
 #include <QSettings>
+#include <QFocusEvent>
 #include <algorithm>
 #include <iostream>
 
@@ -19,6 +20,10 @@ extern "C" {
 
 const int TITLE_BAR_HEIGHT = 32;
 const int BUTTON_SIZE = 24;
+
+#ifdef _WIN32
+MainWindow* MainWindow::s_instance = nullptr;
+#endif
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -60,6 +65,9 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+#ifdef _WIN32
+    uninstallKeyboardHook();
+#endif
     // Ensure clean shutdown
     m_connected = false;
     if (m_vncThread && m_vncThread->joinable()) {
@@ -240,10 +248,62 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.fillRect(0, TITLE_BAR_HEIGHT, width(), height() - TITLE_BAR_HEIGHT, Qt::white);
     }
 }
+
+uint32_t MainWindow::qtKeyToX11Keysym(int qtKey, Qt::KeyboardModifiers modifiers, const QString& text)
+{
+    // Handle printable characters from text when available
+    if (!text.isEmpty() && text[0].isPrint()) {
+        return text[0].unicode();
+    }
+    
+    // Map Qt special keys to X11 keysyms
+    switch (qtKey) {
+        case Qt::Key_Backspace: return XK_BackSpace;
+        case Qt::Key_Tab: return XK_Tab;
+        case Qt::Key_Return:
+        case Qt::Key_Enter: return XK_Return;
+        case Qt::Key_Escape: return XK_Escape;
+        case Qt::Key_Delete: return XK_Delete;
+        case Qt::Key_Home: return XK_Home;
+        case Qt::Key_End: return XK_End;
+        case Qt::Key_PageUp: return XK_Page_Up;
+        case Qt::Key_PageDown: return XK_Page_Down;
+        case Qt::Key_Left: return XK_Left;
+        case Qt::Key_Up: return XK_Up;
+        case Qt::Key_Right: return XK_Right;
+        case Qt::Key_Down: return XK_Down;
+        case Qt::Key_Insert: return XK_Insert;
+        case Qt::Key_Shift: return XK_Shift_L;
+        case Qt::Key_Control: return XK_Control_L;
+        case Qt::Key_Alt: return XK_Alt_L;
+        case Qt::Key_Meta: return XK_Super_L;
+        case Qt::Key_AltGr: return XK_ISO_Level3_Shift;
+        case Qt::Key_CapsLock: return XK_Caps_Lock;
+        case Qt::Key_NumLock: return XK_Num_Lock;
+        case Qt::Key_ScrollLock: return XK_Scroll_Lock;
+        case Qt::Key_F1: return XK_F1;
+        case Qt::Key_F2: return XK_F2;
+        case Qt::Key_F3: return XK_F3;
+        case Qt::Key_F4: return XK_F4;
+        case Qt::Key_F5: return XK_F5;
+        case Qt::Key_F6: return XK_F6;
+        case Qt::Key_F7: return XK_F7;
+        case Qt::Key_F8: return XK_F8;
+        case Qt::Key_F9: return XK_F9;
+        case Qt::Key_F10: return XK_F10;
+        case Qt::Key_F11: return XK_F11;
+        case Qt::Key_F12: return XK_F12;
+        default:
+            // For unhandled keys, try to return the Qt key value directly
+            return qtKey;
+    }
+}
+
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     if (m_connected && m_client && !m_readOnly) {
-        SendKeyEvent(m_client, event->key(), TRUE);
+        uint32_t keysym = qtKeyToX11Keysym(event->key(), event->modifiers(), event->text());
+        SendKeyEvent(m_client, keysym, TRUE);
     }
     QMainWindow::keyPressEvent(event);
 }
@@ -251,10 +311,31 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 void MainWindow::keyReleaseEvent(QKeyEvent *event)
 {
     if (m_connected && m_client && !m_readOnly) {
-        SendKeyEvent(m_client, event->key(), FALSE);
+        uint32_t keysym = qtKeyToX11Keysym(event->key(), event->modifiers(), event->text());
+        SendKeyEvent(m_client, keysym, FALSE);
     }
     QMainWindow::keyReleaseEvent(event);
 }
+
+void MainWindow::focusInEvent(QFocusEvent *event)
+{
+#ifdef _WIN32
+    s_instance = this;
+    if (m_connected && !m_readOnly) {
+        installKeyboardHook();
+    }
+#endif
+    QMainWindow::focusInEvent(event);
+}
+
+void MainWindow::focusOutEvent(QFocusEvent *event)
+{
+#ifdef _WIN32
+    uninstallKeyboardHook();
+#endif
+    QMainWindow::focusOutEvent(event);
+}
+
 void MainWindow::mouseMoveEvent(QMouseEvent *event)
 {
     // Handle window dragging
@@ -296,10 +377,18 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
             m_buttonMask = 0;
             m_pointerSyncedSinceToggle = false;  // Mark for force-sync on next click
             syncPointerToCurrentCursor();
+#ifdef _WIN32
+            if (hasFocus()) {
+                installKeyboardHook();
+            }
+#endif
         } else {
             // Clear any pressed state on transition back to read-only
             m_buttonMask = 0;
             syncPointerToCurrentCursor();
+#ifdef _WIN32
+            uninstallKeyboardHook();
+#endif
         }
         update();
         return;
@@ -455,3 +544,40 @@ void MainWindow::closeEvent(QCloseEvent *event)
     }
     QMainWindow::closeEvent(event);
 }
+
+#ifdef _WIN32
+LRESULT CALLBACK MainWindow::LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
+{
+    if (nCode == HC_ACTION && s_instance && s_instance->m_connected && !s_instance->m_readOnly) {
+        KBDLLHOOKSTRUCT* pKeyboard = (KBDLLHOOKSTRUCT*)lParam;
+        
+        // Intercept Windows keys (VK_LWIN and VK_RWIN)
+        if (pKeyboard->vkCode == VK_LWIN || pKeyboard->vkCode == VK_RWIN) {
+            if (s_instance->m_client) {
+                uint32_t keysym = (pKeyboard->vkCode == VK_LWIN) ? XK_Super_L : XK_Super_R;
+                bool isKeyDown = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
+                SendKeyEvent(s_instance->m_client, keysym, isKeyDown ? TRUE : FALSE);
+            }
+            // Block the key from reaching the OS
+            return 1;
+        }
+    }
+    
+    return CallNextHookEx(NULL, nCode, wParam, lParam);
+}
+
+void MainWindow::installKeyboardHook()
+{
+    if (!m_keyboardHook) {
+        m_keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(NULL), 0);
+    }
+}
+
+void MainWindow::uninstallKeyboardHook()
+{
+    if (m_keyboardHook) {
+        UnhookWindowsHookEx(m_keyboardHook);
+        m_keyboardHook = nullptr;
+    }
+}
+#endif
