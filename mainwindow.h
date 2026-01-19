@@ -43,6 +43,7 @@ private:
     // VNC client state
     bool m_connected = false;
     bool m_readOnly = true;
+    bool m_pointerSyncedSinceToggle = false;
     QImage m_framebuffer;
     rfbClient *m_client = nullptr;
     std::thread *m_vncThread = nullptr;
@@ -54,6 +55,7 @@ private:
     
     // Instance method for framebuffer updates
     void handleFramebufferUpdate(rfbClient *client);
+    void syncPointerToCurrentCursor();
     
     // Custom title bar elements
     QRect titleBarRect;
@@ -64,6 +66,7 @@ private:
     bool buttonHovered;
     QPoint dragPosition;
     bool isDragging;
+    int m_buttonMask = 0;
     QPixmap hideIcon;
     QPixmap eyeIcon;
     bool isToggled;
