@@ -5,6 +5,7 @@
 #include <QKeyEvent>
 #include <QCloseEvent>
 #include <QMessageBox>
+#include <QMenu>
 #include <QToolTip>
 #include <QHelpEvent>
 #include <QCursor>
@@ -15,6 +16,10 @@
 #include <QApplication>
 #include <algorithm>
 #include <iostream>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 extern "C" {
 #include "rfb/rfbclient.h"
@@ -53,21 +58,7 @@ MainWindow::MainWindow(QWidget *parent)
     hideIcon.load(":/icons/resources/icons8-hide-24.png");
     eyeIcon.load(":/icons/resources/icons8-eye-24.png");
     
-    // Restore window position and read-only state from settings
-    QSettings settings("wvncc", "wvncc");
-    if (settings.contains("windowPosition")) {
-        QPoint pos = settings.value("windowPosition").toPoint();
-        move(pos);
-    }
-    if (settings.contains("windowSize")) {
-        QSize size = settings.value("windowSize").toSize();
-        resize(size);
-    }
-    if (settings.contains("readOnlyMode")) {
-        m_readOnly = settings.value("readOnlyMode").toBool();
-        isToggled = m_readOnly;
-        update();
-    }
+    // Note: Window position, size, and read-only state are restored per-server in connectToServer()
 }
 
 MainWindow::~MainWindow()
@@ -113,6 +104,9 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
 {
     // Store password for callback
     m_password = password;
+    
+    // Create server key for per-server settings
+    m_serverKey = serverIp + ":" + std::to_string(serverPort);
     
     // Initialize VNC client
     m_client = rfbGetClient(8, 3, 4);
@@ -169,22 +163,38 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
     int targetHeight = vncHeight + TITLE_BAR_HEIGHT;
     
     QSettings settings("wvncc", "wvncc");
+    QString serverKey = QString::fromStdString(m_serverKey);
+    
+    // Restore per-server read-only mode
+    if (settings.contains(serverKey + "/readOnlyMode")) {
+        m_readOnly = settings.value(serverKey + "/readOnlyMode").toBool();
+        isToggled = m_readOnly;
+        update();
+    }
     
     // If VNC fits at 1:1, use 1:1 scale (don't resize if saved geometry exists to preserve position)
     if (targetWidth <= availableGeometry.width() && targetHeight <= availableGeometry.height()) {
-        if (!settings.contains("windowSize")) {
-            // First run: set 1:1 size
+        if (settings.contains(serverKey + "/windowSize")) {
+            // Restore saved position and size for this server
+            QPoint pos = settings.value(serverKey + "/windowPosition").toPoint();
+            QSize size = settings.value(serverKey + "/windowSize").toSize();
+            move(pos);
+            resize(size);
+            std::cout << "[INFO] Using saved window geometry for " << m_serverKey << std::endl;
+        } else {
+            // First run for this server: set 1:1 size
             resize(targetWidth, targetHeight);
             std::cout << "[INFO] Window sized 1:1 to " << targetWidth << "x" << targetHeight << std::endl;
-        } else {
-            // Re-open: keep saved position and size
-            std::cout << "[INFO] Using saved window geometry at 1:1 scale" << std::endl;
         }
     } else {
         // VNC too large for 1:1
-        if (settings.contains("windowSize")) {
+        if (settings.contains(serverKey + "/windowSize")) {
             // Use saved geometry (user's preferred scaled size)
-            std::cout << "[INFO] Using saved window geometry" << std::endl;
+            QPoint pos = settings.value(serverKey + "/windowPosition").toPoint();
+            QSize size = settings.value(serverKey + "/windowSize").toSize();
+            move(pos);
+            resize(size);
+            std::cout << "[INFO] Using saved window geometry for " << m_serverKey << std::endl;
         } else {
             // First run - scale down to fit
             double scaleWidth = static_cast<double>(availableGeometry.width()) / targetWidth;
@@ -364,6 +374,15 @@ uint32_t MainWindow::qtKeyToX11Keysym(int qtKey, Qt::KeyboardModifiers modifiers
 
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
+#ifdef _WIN32
+    // Check for Alt+F8 combination to show popup menu
+    if (event->key() == Qt::Key_F8 && (event->modifiers() & Qt::AltModifier)) {
+        showPopupMenu();
+        event->accept();
+        return;
+    }
+#endif
+    
     if (m_connected && m_client && !m_readOnly) {
         uint32_t keysym = qtKeyToX11Keysym(event->key(), event->modifiers(), event->text());
         SendKeyEvent(m_client, keysym, TRUE);
@@ -384,7 +403,7 @@ void MainWindow::focusInEvent(QFocusEvent *event)
 {
 #ifdef _WIN32
     s_instance = this;
-    if (m_connected && !m_readOnly) {
+    if (m_connected) {
         installKeyboardHook();
     }
 #endif
@@ -444,18 +463,10 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
             m_buttonMask = 0;
             m_pointerSyncedSinceToggle = false;  // Mark for force-sync on next click
             syncPointerToCurrentCursor();
-#ifdef _WIN32
-            if (hasFocus()) {
-                installKeyboardHook();
-            }
-#endif
         } else {
             // Clear any pressed state on transition back to read-only
             m_buttonMask = 0;
             syncPointerToCurrentCursor();
-#ifdef _WIN32
-            uninstallKeyboardHook();
-#endif
         }
         update();
         return;
@@ -618,13 +629,81 @@ bool MainWindow::event(QEvent *event)
     return QMainWindow::event(event);
 }
 
+void MainWindow::showPopupMenu()
+{
+    QMenu menu(this);
+    
+    // Minimize action
+    QAction* minimizeAction = menu.addAction("Mi&nimize");
+    connect(minimizeAction, &QAction::triggered, this, [this]() {
+#ifdef _WIN32
+        ShowWindow((HWND)winId(), SW_MINIMIZE);
+#else
+        showMinimized();
+#endif
+    });
+    
+    // Maximize/Restore action
+    QAction* maximizeAction = menu.addAction(isMaximized() ? "&Restore" : "Ma&ximize");
+    connect(maximizeAction, &QAction::triggered, this, [this]() {
+#ifdef _WIN32
+        if (isMaximized()) {
+            ShowWindow((HWND)winId(), SW_NORMAL);
+        } else {
+            ShowWindow((HWND)winId(), SW_MAXIMIZE);
+        }
+#else
+        if (isMaximized()) {
+            showNormal();
+        } else {
+            showMaximized();
+        }
+#endif
+    });
+    
+    menu.addSeparator();
+    
+    // Toggle read-only/active action
+    QAction* toggleAction = menu.addAction(m_readOnly ? "&Switch to Active Mode" : "&Switch to Read-Only Mode");
+    connect(toggleAction, &QAction::triggered, this, [this]() {
+        m_readOnly = !m_readOnly;
+        isToggled = m_readOnly;
+        if (!m_readOnly) {
+            m_buttonMask = 0;
+            m_pointerSyncedSinceToggle = false;
+            syncPointerToCurrentCursor();
+        } else {
+            m_buttonMask = 0;
+            syncPointerToCurrentCursor();
+        }
+        update();
+    });
+    
+    menu.addSeparator();
+    
+    // Close action
+    QAction* closeAction = menu.addAction("&Close Application");
+    connect(closeAction, &QAction::triggered, this, &MainWindow::close);
+    
+    // Show menu at cursor position
+    menu.exec(QCursor::pos());
+}
+
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    // Save window position, size, and read-only state to settings
+    // Save per-server window position, size, and read-only state to settings
     QSettings settings("wvncc", "wvncc");
-    settings.setValue("windowPosition", pos());
-    settings.setValue("windowSize", size());
-    settings.setValue("readOnlyMode", m_readOnly);
+    QString serverKey = QString::fromStdString(m_serverKey);
+    settings.setValue(serverKey + "/windowPosition", pos());
+    settings.setValue(serverKey + "/windowSize", size());
+    settings.setValue(serverKey + "/readOnlyMode", m_readOnly);
+    
+#ifdef _WIN32
+    // Reset Win key state and uninstall hook before closing
+    m_winKeyPressed = false;
+    m_winKeySentToVNC = false;
+    uninstallKeyboardHook();
+#endif
     
     m_connected = false;
     if (m_vncThread && m_vncThread->joinable()) {
@@ -636,18 +715,26 @@ void MainWindow::closeEvent(QCloseEvent *event)
 #ifdef _WIN32
 LRESULT CALLBACK MainWindow::LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
-    if (nCode == HC_ACTION && s_instance && s_instance->m_connected && !s_instance->m_readOnly) {
+    if (nCode == HC_ACTION && s_instance && s_instance->m_connected) {
         KBDLLHOOKSTRUCT* pKeyboard = (KBDLLHOOKSTRUCT*)lParam;
         
         // Intercept Windows keys (VK_LWIN and VK_RWIN)
         if (pKeyboard->vkCode == VK_LWIN || pKeyboard->vkCode == VK_RWIN) {
-            if (s_instance->m_client) {
+            bool isKeyDown = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
+            s_instance->m_winKeyPressed = isKeyDown;
+            
+            // Only send to VNC server if in active mode
+            if (!s_instance->m_readOnly && s_instance->m_client) {
                 uint32_t keysym = (pKeyboard->vkCode == VK_LWIN) ? XK_Super_L : XK_Super_R;
-                bool isKeyDown = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
                 SendKeyEvent(s_instance->m_client, keysym, isKeyDown ? TRUE : FALSE);
+                if (isKeyDown) {
+                    s_instance->m_winKeySentToVNC = true;
+                }
+                // Block the key from reaching the OS in active mode
+                return 1;
             }
-            // Block the key from reaching the OS
-            return 1;
+            // In read-only mode, let the Windows key through so OS sees press/release correctly
+            return 0;
         }
     }
     
