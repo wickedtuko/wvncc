@@ -56,6 +56,7 @@ private:
     rfbClient *m_client = nullptr;
     std::thread *m_vncThread = nullptr;
     std::string m_password;
+    std::string m_serverKey;  // serverIp:port for per-server settings
     
     // Static callbacks for rfbClient
     static void framebufferUpdateCallback(rfbClient *client);
@@ -66,11 +67,15 @@ private:
     void syncPointerToCurrentCursor();
     uint32_t qtKeyToX11Keysym(int qtKey, Qt::KeyboardModifiers modifiers, const QString& text);
     QRect getScaledFramebufferRect() const;
+    void showPopupMenu();
     
 #ifdef _WIN32
     static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
     static MainWindow* s_instance;
     HHOOK m_keyboardHook = nullptr;
+    bool m_winKeyPressed = false;
+    bool m_winKeySentToVNC = false;
+    bool m_popupMenuOpen = false;
     void installKeyboardHook();
     void uninstallKeyboardHook();
 #endif
