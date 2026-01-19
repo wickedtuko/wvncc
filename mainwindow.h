@@ -8,6 +8,10 @@
 #include <thread>
 #include <string>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 // Forward declare rfbClient to avoid exposing C header in header file
 struct _rfbClient;
 typedef struct _rfbClient rfbClient;
@@ -36,6 +40,8 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void keyReleaseEvent(QKeyEvent *event) override;
+    void focusInEvent(QFocusEvent *event) override;
+    void focusOutEvent(QFocusEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
     bool event(QEvent *event) override;
 
@@ -58,6 +64,15 @@ private:
     // Instance method for framebuffer updates
     void handleFramebufferUpdate(rfbClient *client);
     void syncPointerToCurrentCursor();
+    uint32_t qtKeyToX11Keysym(int qtKey, Qt::KeyboardModifiers modifiers, const QString& text);
+    
+#ifdef _WIN32
+    static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
+    static MainWindow* s_instance;
+    HHOOK m_keyboardHook = nullptr;
+    void installKeyboardHook();
+    void uninstallKeyboardHook();
+#endif
     
     // Custom title bar elements
     QRect titleBarRect;
