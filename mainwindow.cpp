@@ -153,6 +153,11 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
     std::cout << "[INFO] Connected to " << serverIp << ":" << serverPort << std::endl;
     std::cout << "[INFO] Screen size: " << m_client->width << "x" << m_client->height << std::endl;
     
+    // Update window title with desktop name if available
+    if (m_client->desktopName) {
+        setWindowTitle(QString::fromUtf8(m_client->desktopName));
+    }
+    
     // Calculate window size to fit available display while respecting VNC aspect ratio
     QScreen* screen = QApplication::primaryScreen();
     QRect availableGeometry = screen->availableGeometry();
