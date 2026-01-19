@@ -42,6 +42,7 @@ private:
     
     // VNC client state
     bool m_connected = false;
+    bool m_readOnly = true;
     QImage m_framebuffer;
     rfbClient *m_client = nullptr;
     std::thread *m_vncThread = nullptr;
