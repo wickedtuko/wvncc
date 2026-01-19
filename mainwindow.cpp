@@ -334,7 +334,17 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
             m_pointerSyncedSinceToggle = true;
         }
 
-        m_buttonMask = 1;
+        // Map Qt mouse buttons to VNC button mask
+        int buttonMask = 0;
+        if (event->button() == Qt::LeftButton) {
+            buttonMask = 1;
+        } else if (event->button() == Qt::RightButton) {
+            buttonMask = 4;
+        } else if (event->button() == Qt::MiddleButton) {
+            buttonMask = 2;
+        }
+        
+        m_buttonMask |= buttonMask;
         SendPointerEvent(m_client, x, y, m_buttonMask);
     }
 }
@@ -343,14 +353,25 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     isDragging = false;
     if (m_connected && m_client && !m_readOnly && event->pos().y() >= TITLE_BAR_HEIGHT) {
-        m_buttonMask = 0;
+        // Map Qt mouse buttons to VNC button mask
+        int buttonMask = 0;
+        if (event->button() == Qt::LeftButton) {
+            buttonMask = 1;
+        } else if (event->button() == Qt::RightButton) {
+            buttonMask = 4;
+        } else if (event->button() == Qt::MiddleButton) {
+            buttonMask = 2;
+        }
+        
+        m_buttonMask &= ~buttonMask;
+        
         int x = std::round(event->position().x() / static_cast<double>(width()) * m_client->width);
         int y = std::round((event->position().y() - TITLE_BAR_HEIGHT) / static_cast<double>(height() - TITLE_BAR_HEIGHT) * m_client->height);
         
         x = std::clamp(x, 0, m_client->width - 1);
         y = std::clamp(y, 0, m_client->height - 1);
         
-        SendPointerEvent(m_client, x, y, 0);
+        SendPointerEvent(m_client, x, y, m_buttonMask);
     }
 }
 
