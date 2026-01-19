@@ -663,6 +663,10 @@ void MainWindow::showPopupMenu()
     
     menu.addSeparator();
     
+    // Reset to 1:1 scale action
+    QAction* resetAction = menu.addAction("Reset to &1:1 Scale");
+    connect(resetAction, &QAction::triggered, this, &MainWindow::resetWindowTo1To1);
+    
     // Toggle read-only/active action
     QAction* toggleAction = menu.addAction(m_readOnly ? "&Switch to Active Mode" : "&Switch to Read-Only Mode");
     connect(toggleAction, &QAction::triggered, this, [this]() {
@@ -710,6 +714,35 @@ void MainWindow::closeEvent(QCloseEvent *event)
         m_vncThread->join();
     }
     QMainWindow::closeEvent(event);
+}
+
+void MainWindow::resetWindowTo1To1()
+{
+    if (!m_client || m_framebuffer.isNull()) {
+        return;
+    }
+    
+    int targetWidth = m_client->width;
+    int targetHeight = m_client->height + TITLE_BAR_HEIGHT;
+    
+    // Get available screen geometry
+    QScreen* screen = QApplication::primaryScreen();
+    QRect availableGeometry = screen->availableGeometry();
+    
+    // If it fits on screen at 1:1, use that size
+    if (targetWidth <= availableGeometry.width() && targetHeight <= availableGeometry.height()) {
+        resize(targetWidth, targetHeight);
+    } else {
+        // Otherwise scale down proportionally to fit
+        double scaleWidth = static_cast<double>(availableGeometry.width()) / targetWidth;
+        double scaleHeight = static_cast<double>(availableGeometry.height()) / targetHeight;
+        double scale = std::min(scaleWidth, scaleHeight);
+        
+        targetWidth = static_cast<int>(targetWidth * scale);
+        targetHeight = static_cast<int>(targetHeight * scale);
+        
+        resize(targetWidth, targetHeight);
+    }
 }
 
 #ifdef _WIN32

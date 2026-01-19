@@ -68,6 +68,7 @@ private:
     uint32_t qtKeyToX11Keysym(int qtKey, Qt::KeyboardModifiers modifiers, const QString& text);
     QRect getScaledFramebufferRect() const;
     void showPopupMenu();
+    void resetWindowTo1To1();
     
 #ifdef _WIN32
     static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
