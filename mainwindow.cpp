@@ -9,6 +9,7 @@
 #include <QHelpEvent>
 #include <QCursor>
 #include <QDebug>
+#include <QSettings>
 #include <algorithm>
 #include <iostream>
 
@@ -44,6 +45,17 @@ MainWindow::MainWindow(QWidget *parent)
     // Load button icons from Qt resources
     hideIcon.load(":/icons/resources/icons8-hide-24.png");
     eyeIcon.load(":/icons/resources/icons8-eye-24.png");
+    
+    // Restore window position and read-only state from settings
+    QSettings settings("wvncc", "wvncc");
+    if (settings.contains("windowGeometry")) {
+        restoreGeometry(settings.value("windowGeometry").toByteArray());
+    }
+    if (settings.contains("readOnlyMode")) {
+        m_readOnly = settings.value("readOnlyMode").toBool();
+        isToggled = m_readOnly;
+        update();
+    }
 }
 
 MainWindow::~MainWindow()
@@ -129,8 +141,6 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
     }
     
     m_connected = true;
-    m_readOnly = true;
-    isToggled = true;  // Sync button state with read-only mode
     std::cout << "[INFO] Connected to " << serverIp << ":" << serverPort << std::endl;
     std::cout << "[INFO] Screen size: " << m_client->width << "x" << m_client->height << std::endl;
     
@@ -212,7 +222,7 @@ void MainWindow::paintEvent(QPaintEvent *event)
     painter.drawRect(buttonRect);
     
     // Draw icon centered in button
-    QPixmap& currentIcon = isToggled ? eyeIcon : hideIcon;
+    QPixmap& currentIcon = isToggled ? hideIcon : eyeIcon;
     if (!currentIcon.isNull()) {
         int iconX = buttonRect.center().x() - currentIcon.width() / 2;
         int iconY = buttonRect.center().y() - currentIcon.height() / 2;
@@ -421,7 +431,7 @@ bool MainWindow::event(QEvent *event)
     if (event->type() == QEvent::ToolTip) {
         QHelpEvent *helpEvent = static_cast<QHelpEvent *>(event);
         if (buttonRect.contains(helpEvent->pos())) {
-            QString tooltipText = isToggled ? "Read-Only" : "Active";
+            QString tooltipText = isToggled ? "Read-Only, click to activate" : "Active, click to make it read-only";
             QToolTip::showText(helpEvent->globalPos(), tooltipText, this);
         } else {
             QToolTip::hideText();
@@ -434,6 +444,11 @@ bool MainWindow::event(QEvent *event)
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    // Save window position and read-only state to settings
+    QSettings settings("wvncc", "wvncc");
+    settings.setValue("windowGeometry", saveGeometry());
+    settings.setValue("readOnlyMode", m_readOnly);
+    
     m_connected = false;
     if (m_vncThread && m_vncThread->joinable()) {
         m_vncThread->join();
