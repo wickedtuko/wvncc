@@ -6,6 +6,9 @@
 #include <QMessageBox>
 #include <QToolTip>
 #include <QHelpEvent>
+#include <QCursor>
+#include <QDebug>
+#include <algorithm>
 #include <iostream>
 
 extern "C" {
@@ -28,6 +31,14 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowSystemMenuHint);
     setWindowTitle("wvncc - VNC Client");
     setMouseTracking(true);
+    setAttribute(Qt::WA_Hover, true);
+    setFocusPolicy(Qt::StrongFocus);
+    
+    // Ensure central widget also has mouse tracking
+    if (ui->centralwidget) {
+        ui->centralwidget->setMouseTracking(true);
+        ui->centralwidget->setAttribute(Qt::WA_Hover, true);
+    }
     
     // Load button icons from Qt resources
     hideIcon.load(":/icons/resources/icons8-hide-24.png");
@@ -122,8 +133,16 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
     std::cout << "[INFO] Connected to " << serverIp << ":" << serverPort << std::endl;
     std::cout << "[INFO] Screen size: " << m_client->width << "x" << m_client->height << std::endl;
     
-    // Resize window to match remote framebuffer
-    resize(m_client->width, m_client->height);
+    // Resize window to match remote framebuffer plus title bar
+    resize(m_client->width, m_client->height + TITLE_BAR_HEIGHT);
+
+    // Send multiple button release events to ensure server clears any stale button state
+    for (int i = 0; i < 3; i++) {
+        SendPointerEvent(m_client, m_client->width / 2, m_client->height / 2, 0);
+    }
+
+    // Initialize server pointer to current cursor location (if inside window)
+    syncPointerToCurrentCursor();
     
     // Start VNC message processing thread
     m_vncThread = new std::thread([this]() {
@@ -203,9 +222,9 @@ void MainWindow::paintEvent(QPaintEvent *event)
     painter.setPen(QColor(150, 150, 150));
     painter.drawLine(0, TITLE_BAR_HEIGHT, width(), TITLE_BAR_HEIGHT);
     
-    // Draw VNC framebuffer content
+    // Draw VNC framebuffer content at 100% (no scaling)
     if (!m_framebuffer.isNull()) {
-        painter.drawImage(0, TITLE_BAR_HEIGHT, m_framebuffer.scaled(width(), height() - TITLE_BAR_HEIGHT, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
+        painter.drawImage(0, TITLE_BAR_HEIGHT, m_framebuffer);
     } else {
         painter.fillRect(0, TITLE_BAR_HEIGHT, width(), height() - TITLE_BAR_HEIGHT, Qt::white);
     }
@@ -229,13 +248,17 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event)
     if (buttonHovered) {
         setCursor(Qt::PointingHandCursor);
     } else if (event->pos().y() < TITLE_BAR_HEIGHT) {
-        setCursor(Qt::SizeAllCursor);
-    } else if (m_connected && m_client && !m_readOnly) {
         setCursor(Qt::ArrowCursor);
-        int x = event->position().x() / width() * m_client->width;
-        int y = (event->position().y() - TITLE_BAR_HEIGHT) / (height() - TITLE_BAR_HEIGHT) * m_client->height;
-        int buttonMask = (event->buttons() & Qt::LeftButton) ? 1 : 0;
-        SendPointerEvent(m_client, x, y, buttonMask);
+    } else if (m_connected && m_client && !m_readOnly && event->pos().y() >= TITLE_BAR_HEIGHT) {
+        setCursor(Qt::ArrowCursor);
+        int x = std::round(event->position().x() / static_cast<double>(width()) * m_client->width);
+        int y = std::round((event->position().y() - TITLE_BAR_HEIGHT) / static_cast<double>(height() - TITLE_BAR_HEIGHT) * m_client->height);
+        
+        x = std::clamp(x, 0, m_client->width - 1);
+        y = std::clamp(y, 0, m_client->height - 1);
+        
+        SendPointerEvent(m_client, x, y, m_buttonMask);
+        m_pointerSyncedSinceToggle = true;
     }
 }
 
@@ -244,6 +267,15 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
     if (buttonRect.contains(event->pos())) {
         m_readOnly = !m_readOnly;
         isToggled = m_readOnly;
+        if (!m_readOnly) {
+            m_buttonMask = 0;
+            m_pointerSyncedSinceToggle = false;  // Mark for force-sync on next click
+            syncPointerToCurrentCursor();
+        } else {
+            // Clear any pressed state on transition back to read-only
+            m_buttonMask = 0;
+            syncPointerToCurrentCursor();
+        }
         update();
         return;
     }
@@ -271,23 +303,63 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
     if (event->pos().y() < TITLE_BAR_HEIGHT) {
         isDragging = true;
         dragPosition = event->globalPos() - frameGeometry().topLeft();
+        return;
     }
     
-    if (m_connected && m_client && !m_readOnly) {
-        int x = event->position().x() / width() * m_client->width;
-        int y = (event->position().y() - TITLE_BAR_HEIGHT) / (height() - TITLE_BAR_HEIGHT) * m_client->height;
-        SendPointerEvent(m_client, x, y, 1);
+    if (m_connected && m_client && !m_readOnly && event->pos().y() >= TITLE_BAR_HEIGHT) {
+        int x = std::round(event->position().x() / static_cast<double>(width()) * m_client->width);
+        int y = std::round((event->position().y() - TITLE_BAR_HEIGHT) / static_cast<double>(height() - TITLE_BAR_HEIGHT) * m_client->height);
+
+        x = std::clamp(x, 0, m_client->width - 1);
+        y = std::clamp(y, 0, m_client->height - 1);
+
+        // If pointer hasn't been synced since toggling to active, force a move first
+        if (!m_pointerSyncedSinceToggle) {
+            SendPointerEvent(m_client, x, y, 0);
+            m_pointerSyncedSinceToggle = true;
+        }
+
+        m_buttonMask = 1;
+        SendPointerEvent(m_client, x, y, m_buttonMask);
     }
 }
 
 void MainWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     isDragging = false;
-    if (m_connected && m_client && !m_readOnly) {
-        int x = event->position().x() / width() * m_client->width;
-        int y = (event->position().y() - TITLE_BAR_HEIGHT) / (height() - TITLE_BAR_HEIGHT) * m_client->height;
+    if (m_connected && m_client && !m_readOnly && event->pos().y() >= TITLE_BAR_HEIGHT) {
+        m_buttonMask = 0;
+        int x = std::round(event->position().x() / static_cast<double>(width()) * m_client->width);
+        int y = std::round((event->position().y() - TITLE_BAR_HEIGHT) / static_cast<double>(height() - TITLE_BAR_HEIGHT) * m_client->height);
+        
+        x = std::clamp(x, 0, m_client->width - 1);
+        y = std::clamp(y, 0, m_client->height - 1);
+        
         SendPointerEvent(m_client, x, y, 0);
     }
+}
+
+void MainWindow::syncPointerToCurrentCursor()
+{
+    if (!(m_connected && m_client)) {
+        return;
+    }
+
+    QPoint globalPos = QCursor::pos();
+    QPoint localPos = mapFromGlobal(globalPos);
+
+    // Only sync when inside the framebuffer area
+    if (localPos.y() < TITLE_BAR_HEIGHT || localPos.x() < 0 || localPos.y() < 0 || localPos.x() >= width() || localPos.y() >= height()) {
+        return;
+    }
+
+    int x = std::round(localPos.x() / static_cast<double>(width()) * m_client->width);
+    int y = std::round((localPos.y() - TITLE_BAR_HEIGHT) / static_cast<double>(height() - TITLE_BAR_HEIGHT) * m_client->height);
+
+    x = std::clamp(x, 0, m_client->width - 1);
+    y = std::clamp(y, 0, m_client->height - 1);
+
+    SendPointerEvent(m_client, x, y, m_buttonMask);
 }
 
 void MainWindow::mouseDoubleClickEvent(QMouseEvent *event)
@@ -305,6 +377,11 @@ void MainWindow::mouseDoubleClickEvent(QMouseEvent *event)
 
 bool MainWindow::event(QEvent *event)
 {
+    if (event->type() == QEvent::MouseMove) {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(event);
+        mouseMoveEvent(mouseEvent);
+        return true;
+    }
     if (event->type() == QEvent::ToolTip) {
         QHelpEvent *helpEvent = static_cast<QHelpEvent *>(event);
         if (buttonRect.contains(helpEvent->pos())) {
