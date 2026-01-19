@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(wvncc VERSION 0.1 LANGUAGES CXX)
+project(wvncc VERSION 0.0.1 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -27,6 +27,11 @@ set(PROJECT_SOURCES
         mainwindow.ui
         resources.qrc
 )
+
+# Add Windows resource file for version info
+if(WIN32)
+    list(APPEND PROJECT_SOURCES wvncc.rc)
+endif()
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(wvncc
