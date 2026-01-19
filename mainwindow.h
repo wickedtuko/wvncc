@@ -44,6 +44,7 @@ protected:
     void focusOutEvent(QFocusEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
     bool event(QEvent *event) override;
+    bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 
 private:
     Ui::MainWindow *ui;
@@ -93,5 +94,10 @@ private:
     QPixmap hideIcon;
     QPixmap eyeIcon;
     bool isToggled;
+    bool isResizing = false;
+    int resizeEdge = 0;
+    QPoint resizeStartPos;
+    QRect resizeStartGeometry;
+    const int RESIZE_BORDER = 5;
 };
 #endif // MAINWINDOW_H
