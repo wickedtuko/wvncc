@@ -2,6 +2,7 @@
 #include "./ui_mainwindow.h"
 #include <QPainter>
 #include <QMouseEvent>
+#include <QKeyEvent>
 #include <QCloseEvent>
 #include <QMessageBox>
 #include <QToolTip>
@@ -229,7 +230,21 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.fillRect(0, TITLE_BAR_HEIGHT, width(), height() - TITLE_BAR_HEIGHT, Qt::white);
     }
 }
+void MainWindow::keyPressEvent(QKeyEvent *event)
+{
+    if (m_connected && m_client && !m_readOnly) {
+        SendKeyEvent(m_client, event->key(), TRUE);
+    }
+    QMainWindow::keyPressEvent(event);
+}
 
+void MainWindow::keyReleaseEvent(QKeyEvent *event)
+{
+    if (m_connected && m_client && !m_readOnly) {
+        SendKeyEvent(m_client, event->key(), FALSE);
+    }
+    QMainWindow::keyReleaseEvent(event);
+}
 void MainWindow::mouseMoveEvent(QMouseEvent *event)
 {
     // Handle window dragging
