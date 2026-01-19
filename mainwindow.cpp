@@ -570,6 +570,10 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
     
     // Enable dragging from title bar
     if (event->pos().y() < TITLE_BAR_HEIGHT) {
+        if (event->button() == Qt::RightButton) {
+            showPopupMenu();
+            return;
+        }
         isDragging = true;
         dragPosition = event->globalPosition().toPoint() - frameGeometry().topLeft();
         return;
