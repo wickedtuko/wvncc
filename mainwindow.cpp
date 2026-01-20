@@ -14,6 +14,7 @@
 #include <QFocusEvent>
 #include <QScreen>
 #include <QApplication>
+#include <QClipboard>
 #include <algorithm>
 #include <iostream>
 
@@ -58,6 +59,10 @@ MainWindow::MainWindow(QWidget *parent)
     hideIcon.load(":/icons/resources/icons8-hide-24.png");
     eyeIcon.load(":/icons/resources/icons8-eye-24.png");
     
+    // Connect clipboard signal
+    connect(QApplication::clipboard(), &QClipboard::dataChanged, this, &MainWindow::onClipboardChanged);
+    connect(this, &MainWindow::clipboardReceived, this, &MainWindow::updateClipboardFromServer);
+    
     // Note: Window position, size, and read-only state are restored per-server in connectToServer()
 }
 
@@ -92,12 +97,35 @@ char* MainWindow::getPasswordCallback(rfbClient *client)
     return nullptr;
 }
 
+void MainWindow::gotXCutTextCallback(rfbClient *client, const char *text, int textlen)
+{
+    MainWindow *viewer = static_cast<MainWindow*>(rfbClientGetClientData(client, nullptr));
+    if (viewer) {
+        viewer->handleServerClipboard(text, textlen);
+    }
+}
+
 void MainWindow::handleFramebufferUpdate(rfbClient *client)
 {
     // Create QImage from framebuffer (RGB16 format)
     m_framebuffer = QImage(client->frameBuffer, client->width, client->height, 
                            QImage::Format_RGB16);
     update();
+}
+
+void MainWindow::handleServerClipboard(const char *text, int textlen)
+{
+    if (text && textlen > 0) {
+        QString clipboardText = QString::fromUtf8(text, textlen);
+        emit clipboardReceived(clipboardText);
+    }
+}
+
+void MainWindow::updateClipboardFromServer(const QString &text)
+{
+    m_updatingClipboard = true;
+    QApplication::clipboard()->setText(text);
+    m_updatingClipboard = false;
 }
 
 void MainWindow::connectToServer(const std::string& serverIp, int serverPort, const std::string& password)
@@ -134,6 +162,7 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
     // Set callbacks
     m_client->FinishedFrameBufferUpdate = framebufferUpdateCallback;
     m_client->GetPassword = getPasswordCallback;
+    m_client->GotXCutText = gotXCutTextCallback;
     
     // Set server connection info
     m_client->serverHost = strdup(serverIp.c_str());
@@ -715,6 +744,20 @@ bool MainWindow::event(QEvent *event)
         return true;
     }
     return QMainWindow::event(event);
+}
+
+void MainWindow::onClipboardChanged()
+{
+    // Don't send clipboard updates if we're updating it from the server
+    if (m_updatingClipboard || !m_connected || !m_client || m_readOnly) {
+        return;
+    }
+    
+    QString clipboardText = QApplication::clipboard()->text();
+    if (!clipboardText.isEmpty()) {
+        QByteArray utf8Text = clipboardText.toUtf8();
+        SendClientCutText(m_client, utf8Text.data(), utf8Text.length());
+    }
 }
 
 void MainWindow::showPopupMenu()
