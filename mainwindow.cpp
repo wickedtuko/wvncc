@@ -107,9 +107,9 @@ void MainWindow::gotXCutTextCallback(rfbClient *client, const char *text, int te
 
 void MainWindow::handleFramebufferUpdate(rfbClient *client)
 {
-    // Create QImage from framebuffer (RGB16 format)
+    // Create QImage from framebuffer (RGB32 format)
     m_framebuffer = QImage(client->frameBuffer, client->width, client->height, 
-                           QImage::Format_RGB16);
+                           QImage::Format_RGB32);
     update();
 }
 
@@ -143,20 +143,21 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
         return;
     }
     
-    // Configure client for RGB16 format (5-6-5)
-    m_client->format.depth = 16;
-    m_client->format.bitsPerPixel = 16;
-    m_client->format.redShift = 11;
-    m_client->format.greenShift = 5;
+    // Configure client for RGB32 format (8-8-8 with padding)
+    // This provides true color (16 million colors) for better image quality
+    m_client->format.depth = 24;
+    m_client->format.bitsPerPixel = 32;
+    m_client->format.redShift = 16;
+    m_client->format.greenShift = 8;
     m_client->format.blueShift = 0;
-    m_client->format.redMax = 0x1f;
-    m_client->format.greenMax = 0x3f;
-    m_client->format.blueMax = 0x1f;
+    m_client->format.redMax = 0xff;
+    m_client->format.greenMax = 0xff;
+    m_client->format.blueMax = 0xff;
     
     // Set compression and quality
-    m_client->appData.compressLevel = 9;
-    m_client->appData.qualityLevel = 1;
-    m_client->appData.encodingsString = "tight ultra";
+    m_client->appData.compressLevel = 0;
+    m_client->appData.qualityLevel = 9;
+    m_client->appData.encodingsString = "hextile raw";
     m_client->appData.useRemoteCursor = TRUE;
     
     // Set callbacks
@@ -332,6 +333,10 @@ void MainWindow::paintEvent(QPaintEvent *event)
     
     // Draw VNC framebuffer content scaled to fit window while maintaining aspect ratio
     if (!m_framebuffer.isNull()) {
+        // Enable high-quality rendering
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        
         QRect targetRect(0, TITLE_BAR_HEIGHT, width(), height() - TITLE_BAR_HEIGHT);
         QSize scaledSize = m_framebuffer.size().scaled(targetRect.size(), Qt::KeepAspectRatio);
         
