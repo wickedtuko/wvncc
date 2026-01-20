@@ -26,6 +26,9 @@ class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
+signals:
+    void clipboardReceived(const QString &text);
+
 public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
@@ -58,19 +61,27 @@ private:
     std::thread *m_vncThread = nullptr;
     std::string m_password;
     std::string m_serverKey;  // serverIp:port for per-server settings
+    bool m_updatingClipboard = false;  // Flag to prevent clipboard feedback loop
     
     // Static callbacks for rfbClient
     static void framebufferUpdateCallback(rfbClient *client);
     static char* getPasswordCallback(rfbClient *client);
+    static void gotXCutTextCallback(rfbClient *client, const char *text, int textlen);
     
     // Instance method for framebuffer updates
     void handleFramebufferUpdate(rfbClient *client);
+    void handleServerClipboard(const char *text, int textlen);
     void syncPointerToCurrentCursor();
     uint32_t qtKeyToX11Keysym(int qtKey, Qt::KeyboardModifiers modifiers, const QString& text);
     QRect getScaledFramebufferRect() const;
     void showPopupMenu();
     void resetWindowTo1To1();
+
+private slots:
+    void onClipboardChanged();
+    void updateClipboardFromServer(const QString &text);
     
+private:
 #ifdef _WIN32
     static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
     static MainWindow* s_instance;
