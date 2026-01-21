@@ -797,6 +797,10 @@ void MainWindow::showPopupMenu()
 #endif
     });
     
+    // Close action
+    QAction* closeAction = menu.addAction("&Close Application");
+    connect(closeAction, &QAction::triggered, this, &MainWindow::close);
+
     menu.addSeparator();
     
     // Reset to 1:1 scale action
@@ -819,11 +823,20 @@ void MainWindow::showPopupMenu()
         update();
     });
     
-    menu.addSeparator();
-    
-    // Close action
-    QAction* closeAction = menu.addAction("&Close Application");
-    connect(closeAction, &QAction::triggered, this, &MainWindow::close);
+    // Send Ctrl+Alt+Del action
+    QAction* cadAction = menu.addAction("Send Ctrl+Alt+&Del");
+    cadAction->setEnabled(!m_readOnly);
+    connect(cadAction, &QAction::triggered, this, [this]() {
+        if (m_connected && m_client && !m_readOnly) {
+            // Send Ctrl+Alt+Del sequence
+            SendKeyEvent(m_client, XK_Control_L, TRUE);
+            SendKeyEvent(m_client, XK_Alt_L, TRUE);
+            SendKeyEvent(m_client, XK_Delete, TRUE);
+            SendKeyEvent(m_client, XK_Delete, FALSE);
+            SendKeyEvent(m_client, XK_Alt_L, FALSE);
+            SendKeyEvent(m_client, XK_Control_L, FALSE);
+        }
+    });
     
     // Show menu at cursor position
     menu.exec(QCursor::pos());
