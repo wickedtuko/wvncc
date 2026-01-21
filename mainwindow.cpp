@@ -38,7 +38,7 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
     , buttonHovered(false)
     , isDragging(false)
-    , isToggled(false)
+    , isToggled(true)  // Start with read-only icon since m_readOnly defaults to true
 {
     ui->setupUi(this);
     
