@@ -1,5 +1,7 @@
 #include <windows.h>
 
+IDI_ICON1 ICON "resources/icons8_Jetpack_Joyride.ico"
+
 1 VERSIONINFO
 FILEVERSION     0,0,1,0
 PRODUCTVERSION  0,0,1,0
