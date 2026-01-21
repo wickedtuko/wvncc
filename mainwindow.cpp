@@ -217,9 +217,12 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
             resize(size);
             std::cout << "[INFO] Using saved window geometry for " << m_serverKey << std::endl;
         } else {
-            // First run for this server: set 1:1 size
+            // First run for this server: set 1:1 size and center on screen
             resize(targetWidth, targetHeight);
-            std::cout << "[INFO] Window sized 1:1 to " << targetWidth << "x" << targetHeight << std::endl;
+            int x = availableGeometry.x() + (availableGeometry.width() - targetWidth) / 2;
+            int y = availableGeometry.y() + (availableGeometry.height() - targetHeight) / 2;
+            move(x, y);
+            std::cout << "[INFO] Window sized 1:1 to " << targetWidth << "x" << targetHeight << " and centered" << std::endl;
         }
     } else {
         // VNC too large for 1:1
@@ -231,7 +234,7 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
             resize(size);
             std::cout << "[INFO] Using saved window geometry for " << m_serverKey << std::endl;
         } else {
-            // First run - scale down to fit
+            // First run - scale down to fit and center on screen
             double scaleWidth = static_cast<double>(availableGeometry.width()) / targetWidth;
             double scaleHeight = static_cast<double>(availableGeometry.height()) / targetHeight;
             double scale = std::min(scaleWidth, scaleHeight);
@@ -240,8 +243,11 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
             targetHeight = static_cast<int>(targetHeight * scale);
             
             resize(targetWidth, targetHeight);
+            int x = availableGeometry.x() + (availableGeometry.width() - targetWidth) / 2;
+            int y = availableGeometry.y() + (availableGeometry.height() - targetHeight) / 2;
+            move(x, y);
             std::cout << "[INFO] Scaled window to " << targetWidth << "x" << targetHeight 
-                      << " (scale factor: " << scale << ")" << std::endl;
+                      << " (scale factor: " << scale << ") and centered" << std::endl;
         }
     }
 
