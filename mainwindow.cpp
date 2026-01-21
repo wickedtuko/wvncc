@@ -821,6 +821,20 @@ void MainWindow::showPopupMenu()
     
     menu.addSeparator();
     
+    // Send Ctrl+Alt+Del action
+    QAction* cadAction = menu.addAction("Send Ctrl+Alt+&Del");
+    connect(cadAction, &QAction::triggered, this, [this]() {
+        if (m_connected && m_client && !m_readOnly) {
+            // Send Ctrl+Alt+Del sequence
+            SendKeyEvent(m_client, XK_Control_L, TRUE);
+            SendKeyEvent(m_client, XK_Alt_L, TRUE);
+            SendKeyEvent(m_client, XK_Delete, TRUE);
+            SendKeyEvent(m_client, XK_Delete, FALSE);
+            SendKeyEvent(m_client, XK_Alt_L, FALSE);
+            SendKeyEvent(m_client, XK_Control_L, FALSE);
+        }
+    });
+    
     // Close action
     QAction* closeAction = menu.addAction("&Close Application");
     connect(closeAction, &QAction::triggered, this, &MainWindow::close);
