@@ -730,6 +730,28 @@ void MainWindow::mouseDoubleClickEvent(QMouseEvent *event)
     QMainWindow::mouseDoubleClickEvent(event);
 }
 
+void MainWindow::wheelEvent(QWheelEvent *event)
+{
+    if (m_connected && m_client && !m_readOnly && event->position().y() >= TITLE_BAR_HEIGHT) {
+        QRect scaledRect = getScaledFramebufferRect();
+        if (scaledRect.contains(event->position().toPoint())) {
+            int x = std::round((event->position().x() - scaledRect.x()) / static_cast<double>(scaledRect.width()) * m_client->width);
+            int y = std::round((event->position().y() - scaledRect.y()) / static_cast<double>(scaledRect.height()) * m_client->height);
+            
+            x = std::clamp(x, 0, m_client->width - 1);
+            y = std::clamp(y, 0, m_client->height - 1);
+            
+            // VNC uses buttons 4 (scroll up) and 5 (scroll down)
+            int scrollButton = (event->angleDelta().y() > 0) ? 8 : 16;  // Button 4 = 0x08, Button 5 = 0x10
+            
+            // Send scroll down, then up (simulating a button click)
+            SendPointerEvent(m_client, x, y, m_buttonMask | scrollButton);
+            SendPointerEvent(m_client, x, y, m_buttonMask);
+        }
+    }
+    QMainWindow::wheelEvent(event);
+}
+
 bool MainWindow::event(QEvent *event)
 {
     if (event->type() == QEvent::MouseMove) {
