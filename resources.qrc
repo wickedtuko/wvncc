@@ -2,5 +2,6 @@
     <qresource prefix="/icons">
         <file>resources/icons8-hide-24.png</file>
         <file>resources/icons8-eye-24.png</file>
+        <file>resources/icons8_Jetpack_Joyride.ico</file>
     </qresource>
 </RCC>

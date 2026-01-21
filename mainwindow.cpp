@@ -42,6 +42,9 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
     
+    // Set application icon
+    setWindowIcon(QIcon(":/icons/resources/icons8_Jetpack_Joyride.ico"));
+    
     // Make window frameless
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowSystemMenuHint);
     setWindowTitle("wvncc - VNC Client");
