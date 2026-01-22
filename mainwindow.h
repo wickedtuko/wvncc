@@ -57,6 +57,7 @@ private:
     bool m_connected = false;
     bool m_readOnly = true;
     bool m_pointerSyncedSinceToggle = false;
+    bool m_alwaysOnTop = false;
     QImage m_framebuffer;
     rfbClient *m_client = nullptr;
     std::thread *m_vncThread = nullptr;

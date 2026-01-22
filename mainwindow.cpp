@@ -15,6 +15,7 @@
 #include <QScreen>
 #include <QApplication>
 #include <QClipboard>
+#include <QMetaObject>
 #include <algorithm>
 #include <iostream>
 
@@ -208,6 +209,15 @@ void MainWindow::connectToServer(const std::string& serverIp, int serverPort, co
         m_readOnly = settings.value(serverKey + "/readOnlyMode").toBool();
         isToggled = m_readOnly;
         update();
+    }
+    
+    // Restore per-server always on top setting
+    if (settings.contains(serverKey + "/alwaysOnTop")) {
+        m_alwaysOnTop = settings.value(serverKey + "/alwaysOnTop").toBool();
+        if (m_alwaysOnTop) {
+            setWindowFlags(windowFlags() | Qt::WindowStaysOnTopHint);
+            show();
+        }
     }
     
     // If VNC fits at 1:1, use 1:1 scale (don't resize if saved geometry exists to preserve position)
@@ -423,8 +433,8 @@ uint32_t MainWindow::qtKeyToX11Keysym(int qtKey, Qt::KeyboardModifiers modifiers
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
 #ifdef _WIN32
-    // Check for Alt+F8 combination to show popup menu
-    if (event->key() == Qt::Key_F8 && (event->modifiers() & Qt::AltModifier)) {
+    // Check for F12 to show popup menu
+    if (event->key() == Qt::Key_F12) {
         showPopupMenu();
         event->accept();
         return;
@@ -838,6 +848,20 @@ void MainWindow::showPopupMenu()
     QAction* resetAction = menu.addAction("Reset to &1:1 Scale");
     connect(resetAction, &QAction::triggered, this, &MainWindow::resetWindowTo1To1);
     
+    // Always on top toggle action
+    QAction* alwaysOnTopAction = menu.addAction("Always On &Top");
+    alwaysOnTopAction->setCheckable(true);
+    alwaysOnTopAction->setChecked(m_alwaysOnTop);
+    connect(alwaysOnTopAction, &QAction::triggered, this, [this]() {
+        m_alwaysOnTop = !m_alwaysOnTop;
+        if (m_alwaysOnTop) {
+            setWindowFlags(windowFlags() | Qt::WindowStaysOnTopHint);
+        } else {
+            setWindowFlags(windowFlags() & ~Qt::WindowStaysOnTopHint);
+        }
+        show();
+    });
+    
     // Toggle read-only/active action
     QAction* toggleAction = menu.addAction(m_readOnly ? "&Switch to Active Mode" : "&Switch to Read-Only Mode");
     connect(toggleAction, &QAction::triggered, this, [this]() {
@@ -881,6 +905,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     settings.setValue(serverKey + "/windowPosition", pos());
     settings.setValue(serverKey + "/windowSize", size());
     settings.setValue(serverKey + "/readOnlyMode", m_readOnly);
+    settings.setValue(serverKey + "/alwaysOnTop", m_alwaysOnTop);
     
 #ifdef _WIN32
     // Reset Win key state and uninstall hook before closing
@@ -1020,14 +1045,22 @@ LRESULT CALLBACK MainWindow::LowLevelKeyboardProc(int nCode, WPARAM wParam, LPAR
         if (pKeyboard->vkCode == VK_LMENU || pKeyboard->vkCode == VK_RMENU) {
             s_instance->m_altKeyPressed = isKeyDown;
             
-            // Only block and send Alt if in active mode, but allow it to reach Qt for Alt+F8
+            // Only block and send Alt if in active mode
             if (!s_instance->m_readOnly && s_instance->m_client) {
                 uint32_t keysym = (pKeyboard->vkCode == VK_LMENU) ? XK_Alt_L : XK_Alt_R;
                 SendKeyEvent(s_instance->m_client, keysym, isKeyDown ? TRUE : FALSE);
-                // Block Alt from reaching the OS in active mode (but let Qt see it for Alt+F8)
-                // We return 0 here to let it reach Qt, then Qt will handle it
-                return 0;
+                // Block Alt from reaching the OS so subsequent Alt+Tab remains remote
+                return 1;
             }
+        }
+        
+        // Handle F12 (popup menu) inside the hook
+        if (pKeyboard->vkCode == VK_F12 && isKeyDown) {
+            // Show popup regardless of read-only/active to preserve existing behavior
+            QMetaObject::invokeMethod(s_instance, [viewer = s_instance]() {
+                viewer->showPopupMenu();
+            }, Qt::QueuedConnection);
+            return 1;  // Consume F12
         }
         
         // Intercept Tab when Alt is pressed to handle Alt+Tab
